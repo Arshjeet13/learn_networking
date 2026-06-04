@@ -2,6 +2,9 @@
 
 A minimal client/server pair. The client asks you to type a message, sends it to the server over TCP, and the server sends the exact bytes back. One message per connection; the connection closes after the echo.
 
+## Mental mind map
+Sockets are just "files" somewhere on your machine. You write bytes to your sockets and also receive bytes on your sockets. These sockets are identified by integers, called file descriptors.
+
 ## High-Level Flow
 
 ```
@@ -53,7 +56,7 @@ sockaddr_storage      <- a buffer big enough to hold any of the above
 ```
 
 **Why are they called "socket address"?**
-Not just the IP — it means IP + port together (the full identity of one endpoint of a
+It stores not just the IP, but the IP + port together (the full identity of one endpoint of a
 connection). The name is deliberately broader: Unix domain sockets use a filesystem path
 as their "address," with no IP at all.
 
@@ -173,14 +176,14 @@ try each until `bind`/`connect` succeeds.
 ```cpp
 #define PORT "8080"
 ```
-Port number as a **string**. `getaddrinfo` takes a service name or port string, not an integer.
+Port number as a **string**. `getaddrinfo` takes a service name or port string, not an integer. This is the port number on the server at which we want to communicate. 
 
 ```cpp
 #define BACKLOG 10
 ```
 Maximum number of incoming connections that can sit in the kernel's queue waiting for `accept()`
 to be called. If the queue is full, new connection attempts are refused. 10 is a typical small
-value for a single-threaded server.
+value for a single-threaded server. 
 
 ---
 
@@ -191,7 +194,7 @@ int sockfd, clientfd;
 struct addrinfo hints, *res;
 ```
 
-- `their_addr` — filled by `accept()` with the connecting client's IP and port.
+- `their_addr` — this is a buffer to hold the incoming client's address (IP + Port). It is filled by `accept()`
 - `addr_size` — the size of `their_addr`; passed to `accept()` so it knows how much space it has.
 - `sockfd` — the **listening** socket. Stays open for the lifetime of the server.
 - `clientfd` — a **per-connection** socket returned by `accept()`. Each new client gets its own fd.
@@ -228,7 +231,7 @@ on this machine." Without this flag, `NULL` hostname resolves to the loopback ad
 ```cpp
 if((rv = getaddrinfo(NULL, PORT, &hints, &res)) != 0){ ... }
 ```
-
+Here, we pass hints to hostname + service (in this case NULL, i.e. the machine itself), which lets us filter out the types of ip addresses we want.
 | Parameter | Value | Meaning |
 |-----------|-------|---------|
 | `node`    | `NULL` | Hostname to look up. NULL + AI_PASSIVE = any local interface. |
