@@ -37,6 +37,114 @@ close()            ── FIN ──>       close(clientfd)              <- tear
 
 ## Key Data Structures
 
+### The `sockaddr` Family
+
+These form a C-style polymorphism hierarchy. `sockaddr` is the generic base that all syscalls
+accept. The concrete types hold the actual address data. You fill in a concrete type, then cast
+to `(struct sockaddr *)` when calling syscalls.
+
+```
+sockaddr              <- generic base, used as the "interface" in all syscalls
+├── sockaddr_in       <- concrete IPv4
+├── sockaddr_in6      <- concrete IPv6
+└── sockaddr_un       <- concrete Unix domain socket (filepath, no IP at all)
+
+sockaddr_storage      <- a buffer big enough to hold any of the above
+```
+
+**Why are they called "socket address"?**
+Not just the IP — it means IP + port together (the full identity of one endpoint of a
+connection). The name is deliberately broader: Unix domain sockets use a filesystem path
+as their "address," with no IP at all.
+
+**How the polymorphism works:**
+Every struct in this family starts with `sa_family` as its very first field. The kernel always
+reads that field first to know how to interpret the rest of the bytes. You cast between types,
+and it works because the discriminant field is always in the same position.
+
+---
+
+#### `struct sockaddr` — the generic interface
+
+```c
+struct sockaddr {
+    sa_family_t sa_family;   // which family: AF_INET, AF_INET6, AF_UNIX, ...
+    char        sa_data[14]; // raw address bytes — opaque, never write to this directly
+};
+// total: 16 bytes
+```
+
+You never fill this in directly. It exists purely so syscalls like `bind()`, `connect()`,
+`accept()` can have one signature that works for all address families:
+
+```c
+int bind(int sockfd, struct sockaddr *addr, socklen_t addrlen);
+//                   ^^^^^^^^^^^^^^^^
+//                   takes the base type — you cast your concrete type to this
+```
+
+---
+
+#### `struct sockaddr_in` — IPv4 concrete type
+
+```c
+struct sockaddr_in {
+    sa_family_t    sin_family;   // AF_INET
+    in_port_t      sin_port;     // port in network byte order (big-endian)
+    struct in_addr sin_addr;     // 4-byte IPv4 address
+    char           sin_zero[8];  // padding to match sockaddr's 16-byte size
+};
+// total: 16 bytes — same as sockaddr, so the cast is safe
+```
+
+The `sin_zero` padding exists purely to make the sizes match so the cast to `sockaddr *` is
+safe. When you use `getaddrinfo`, it fills this in for you — you don't construct it manually.
+
+---
+
+#### `struct sockaddr_in6` — IPv6 concrete type
+
+```c
+struct sockaddr_in6 {
+    sa_family_t     sin6_family;    // AF_INET6
+    in_port_t       sin6_port;      // port in network byte order
+    uint32_t        sin6_flowinfo;  // flow info (usually 0)
+    struct in6_addr sin6_addr;      // 16-byte IPv6 address
+    uint32_t        sin6_scope_id;
+};
+// total: 28 bytes — larger because IPv6 addresses are 128-bit vs 32-bit
+```
+
+---
+
+#### `struct sockaddr_storage` — catch-all buffer
+
+```c
+struct sockaddr_storage {
+    sa_family_t ss_family;  // readable without casting — tells you which type is inside
+    // ... opaque padding large enough to hold any sockaddr_* type
+};
+// total: typically 128 bytes
+```
+
+Use this when you don't know the address family ahead of time (e.g., `accept()` with
+`AF_UNSPEC`). After the call, read `ss_family` to know which concrete type to cast to:
+
+```c
+struct sockaddr_storage their_addr;
+accept(sockfd, (struct sockaddr *)&their_addr, &addr_size);
+
+if (their_addr.ss_family == AF_INET) {
+    struct sockaddr_in *s = (struct sockaddr_in *)&their_addr;
+    // s->sin_addr is the IPv4 address
+} else {
+    struct sockaddr_in6 *s = (struct sockaddr_in6 *)&their_addr;
+    // s->sin6_addr is the IPv6 address
+}
+```
+
+---
+
 ### `struct addrinfo`
 
 Used both as input (hints) and output (result linked list) for `getaddrinfo`.
@@ -48,39 +156,15 @@ struct addrinfo {
     int              ai_socktype;   // SOCK_STREAM (TCP), SOCK_DGRAM (UDP)
     int              ai_protocol;   // IPPROTO_TCP, IPPROTO_UDP, or 0 to auto-select
     socklen_t        ai_addrlen;    // byte-length of the ai_addr field below
-    struct sockaddr *ai_addr;       // points to a sockaddr_in or sockaddr_in6 (see below)
+    struct sockaddr *ai_addr;       // points to a sockaddr_in or sockaddr_in6
     char            *ai_canonname;  // canonical hostname string (only if AI_CANONNAME set)
-    struct addrinfo *ai_next;       // next result in the linked list (NULL = end)
+    struct addrinfo *ai_next;       // next node in linked list (NULL = end)
 };
 ```
 
 `getaddrinfo` can return multiple results (e.g., one IPv4 and one IPv6). In this project we
 just use `res` (the first result) directly. A production server would iterate the list and
 try each until `bind`/`connect` succeeds.
-
-### `struct sockaddr_storage`
-
-A catch-all buffer large enough to hold either a `sockaddr_in` (IPv4) or `sockaddr_in6` (IPv6).
-Used in the server so we can accept connections from either protocol without knowing in advance
-which one the client will use. Cast to `(struct sockaddr *)` whenever a syscall needs it.
-
-```c
-// What sockaddr_in looks like underneath (IPv4):
-struct sockaddr_in {
-    sa_family_t    sin_family;   // AF_INET
-    in_port_t      sin_port;     // port in network byte order (big-endian)
-    struct in_addr sin_addr;     // 4-byte IPv4 address
-};
-
-// What sockaddr_in6 looks like underneath (IPv6):
-struct sockaddr_in6 {
-    sa_family_t     sin6_family;   // AF_INET6
-    in_port_t       sin6_port;     // port in network byte order
-    uint32_t        sin6_flowinfo; // flow info (usually 0)
-    struct in6_addr sin6_addr;     // 16-byte IPv6 address
-    uint32_t        sin6_scope_id; // scope ID
-};
-```
 
 ---
 
@@ -372,6 +456,78 @@ freeaddrinfo(res);
 
 `close(sockfd)` sends a TCP FIN to the server, signaling end-of-transmission. Then we free
 the `addrinfo` linked list. Always call `freeaddrinfo` after you're done with `res`.
+
+---
+
+## Function Signatures
+
+The actual C declarations for every function used in this project.
+
+```c
+// resolve a hostname/port into a linked list of addrinfo structs
+int getaddrinfo(
+    const char           *node,    // hostname ("localhost") or NULL for own address
+    const char           *service, // port as string ("8080") or service name ("http")
+    const struct addrinfo *hints,  // input: filter describing what you want
+    struct addrinfo      **res     // output: pointer to result linked list (you must free this)
+);
+
+// create a socket, returns a file descriptor
+int socket(
+    int domain,    // address family: AF_INET, AF_INET6, AF_UNSPEC
+    int type,      // socket type: SOCK_STREAM (TCP), SOCK_DGRAM (UDP)
+    int protocol   // protocol: 0 (auto), IPPROTO_TCP, IPPROTO_UDP
+);
+
+// assign a local address+port to a socket (server only)
+int bind(
+    int                    sockfd,  // the socket file descriptor
+    const struct sockaddr *addr,    // address to bind to (cast from sockaddr_in/in6)
+    socklen_t              addrlen  // byte size of addr
+);
+
+// mark socket as passive, start queuing incoming connections (server only)
+int listen(
+    int sockfd,  // the socket to listen on
+    int backlog  // max length of the pending-connection queue
+);
+
+// block until a client connects, return a new fd for that connection (server only)
+int accept(
+    int               sockfd,   // the listening socket
+    struct sockaddr  *addr,     // output: filled with the client's address
+    socklen_t        *addrlen   // in/out: space available → actual bytes written
+);
+
+// initiate a TCP connection to a server (client only)
+int connect(
+    int                    sockfd,   // the local socket
+    const struct sockaddr *addr,     // server's address (from getaddrinfo)
+    socklen_t              addrlen   // byte size of addr
+);
+
+// send bytes over a connected socket
+ssize_t send(
+    int         sockfd,  // the socket to send on
+    const void *buf,     // pointer to the data to send
+    size_t      len,     // number of bytes to send
+    int         flags    // 0 for default; MSG_NOSIGNAL to suppress SIGPIPE
+);
+
+// receive bytes from a connected socket, blocks until data arrives
+ssize_t recv(
+    int    sockfd,  // the socket to receive from
+    void  *buf,     // destination buffer
+    size_t len,     // max bytes to read
+    int    flags    // 0 for default; MSG_WAITALL to wait for full len
+);
+
+// close a socket, sends TCP FIN to the remote end
+int close(int fd);
+
+// free the linked list allocated by getaddrinfo
+void freeaddrinfo(struct addrinfo *res);
+```
 
 ---
 
