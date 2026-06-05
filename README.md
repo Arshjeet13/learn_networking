@@ -1,12 +1,14 @@
 # Networking Practice
 
 C++ socket programming exercises, built up from scratch using POSIX BSD sockets. Each project lives in its own directory and is self-contained.
+The aim of this practice is to be able to apply TCP/IP networking concepts in a larger limit order book based project.
 
 ## Projects
 
 | Directory | Description |
 |-----------|-------------|
 | `echo1/`  | Simple TCP echo server + client. Client sends one message, server sends it back. |
+| `ech21/`  | Simple TCP echo server + client. Client sends one message following a specific protocol (first 2 bytes denote message size). server sends only the message back after properly parsing the input data stream |
 
 ## Common Build Pattern
 
