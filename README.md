@@ -8,7 +8,7 @@ The aim of this practice is to learn enough to be able to apply TCP/IP networkin
 | Directory | Description |
 |-----------|-------------|
 | `echo1/`  | Simple TCP echo server + client. Client sends one message, server sends it back. |
-| `ech21/`  | Simple TCP echo server + client. Client sends one message following a specific protocol (first 2 bytes denote message size). server sends only the message back after properly parsing the input data stream |
+| `echo2/`  | Simple TCP echo server + client. Client sends one message following a specific protocol (first 2 bytes denote message size). server sends only the message back after properly parsing the input data stream |
 
 ## Common Build Pattern
 
