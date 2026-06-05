@@ -1,7 +1,7 @@
 # Networking Practice
 
 C++ socket programming exercises, built up from scratch using POSIX BSD sockets. Each project lives in its own directory and is self-contained.
-The aim of this practice is to be able to apply TCP/IP networking concepts in a larger limit order book based project.
+The aim of this practice is to learn enough to be able to apply TCP/IP networking concepts in a larger limit order book based project.
 
 ## Projects
 
